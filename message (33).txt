@@ -1,0 +1,128 @@
+local Area = game:GetService("Workspace")
+local UIS = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local MyView = Area.CurrentCamera
+local Locked = false -- Toggle state
+local Target = nil -- Current target
+local Epitaph = 0
+local HeadOffset = Vector3.new(0, .1, 0)
+
+_G.TeamCheck = false
+_G.AimPart = "Head"
+_G.CircleRadius = 45 -- Radius of FOV circle
+_G.ScriptActive = false -- Global toggle to enable/disable the script
+
+-- Create the FOV circle
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Radius = _G.CircleRadius
+FOVCircle.Thickness = 2
+FOVCircle.Filled = false
+FOVCircle.Transparency = 0.5
+FOVCircle.Visible = _G.ScriptActive
+
+local function UpdateFOVCirclePosition()
+    -- Ensure FOV circle updates only when the script is active
+    if not _G.ScriptActive then return end
+    local mouseLocation = UIS:GetMouseLocation()
+    FOVCircle.Position = Vector2.new(mouseLocation.X, mouseLocation.Y)
+end
+
+local hue = 0
+local function UpdateRainbowColor()
+    -- Color updates only occur when the script is active
+    if not _G.ScriptActive then return end
+    hue = (hue + 1) % 360
+    local color = Color3.fromHSV(hue / 360, 1, 1)
+    FOVCircle.Color = color
+end
+
+local function FindNearestPlayerFromClosestTwo()
+    -- Player finding functionality is bypassed when the script is inactive
+    if not _G.ScriptActive then return end
+    local myCharacter = LocalPlayer.Character
+    local myPosition = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart") and myCharacter.HumanoidRootPart.Position
+    if not myPosition then return nil end
+
+    local playersAndDistances = {}
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character:FindFirstChild("Humanoid").Health > 0 and player.Character:FindFirstChild(_G.AimPart) then
+            local theirPosition = player.Character.HumanoidRootPart.Position
+            local dist = (myPosition - theirPosition).magnitude
+            table.insert(playersAndDistances, {player = player, dist = dist})
+        end
+    end
+
+    table.sort(playersAndDistances, function(a, b) return a.dist < b.dist end)
+    local closestTwo = {playersAndDistances[1], playersAndDistances[2]}
+
+    local nearestTarget = nil
+    local smallestDistToCursor = _G.CircleRadius
+    for _, info in ipairs(closestTwo) do
+        if info and info.player.Character then
+            local charPart, visible = MyView:WorldToViewportPoint(info.player.Character[_G.AimPart].Position)
+            if visible then
+                local screenPoint = Vector2.new(charPart.X, charPart.Y)
+                local cursorPoint = UIS:GetMouseLocation()
+                local distToCursor = (cursorPoint - screenPoint).magnitude
+                if distToCursor < smallestDistToCursor then
+                    smallestDistToCursor = distToCursor
+                    nearestTarget = info.player.Character
+                end
+            end
+        end
+    end
+
+    return nearestTarget
+end
+
+local function ToggleLock()
+    -- Lock toggling only functions when the script is active
+    if not _G.ScriptActive then return end
+    Locked = not Locked
+    if Locked then
+        Target = FindNearestPlayerFromClosestTwo()
+        if Target then
+            game.StarterGui:SetCore("SendNotification", {
+                Title = "Locked",
+                Text = "Locked onto " .. Target.Name,
+                Duration = 3,
+            })
+        else
+            Locked = false
+            game.StarterGui:SetCore("SendNotification", {
+                Title = "No Target",
+                Text = "No target found within FOV",
+                Duration = 3,
+            })
+        end
+    else
+        Target = nil
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "Unlocked",
+            Text = "Unlocked",
+            Duration = 3,
+        })
+    end
+end
+
+UIS.InputBegan:Connect(function(Input, GameProcessed)
+    if not GameProcessed and Input.KeyCode == Enum.KeyCode.E then
+        ToggleLock()
+    end
+end)
+
+game:GetService("RunService").RenderStepped:Connect(function()
+    if not _G.ScriptActive then 
+        FOVCircle.Visible = false;  -- Ensures FOV circle is hidden when the script is inactive
+        return 
+    end
+    FOVCircle.Visible = true;  -- Ensures FOV circle is visible when the script is active
+    UpdateFOVCirclePosition()
+    UpdateRainbowColor()
+    if Locked and Target then
+        local TargetPosition = Target[_G.AimPart].Position + HeadOffset
+        MyView.CFrame = CFrame.lookAt(MyView.CFrame.Position, TargetPosition)
+    end
+end)
